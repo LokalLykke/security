@@ -15,7 +15,7 @@ class GoogleAuthenticator(client : WSClient) {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   def initializeFlow(clientId : String, redirectUrl : String, nonce : String, state : String)(implicit executionContext: ExecutionContext) = {
-    GoogleAuthenticator.discoveryDocument(client).map {
+    GoogleAuthenticator.readDiscoveryDocument(client).map {
       case doc => {
         val scope = encodeUrlParameter("openid email")
         val responseType = "code"
@@ -31,7 +31,7 @@ class GoogleAuthenticator(client : WSClient) {
   }
 
   def exchangeCode(code : String, clientId : String, clientSecret : String, redirectUrl : String)(implicit executionContext: ExecutionContext) = {
-    GoogleAuthenticator.discoveryDocument.map {
+    GoogleAuthenticator.readDiscoveryDocument(client).map {
       case doc => {
         val parameterString = s"code=$code&client_id=$clientId&client_secret=$clientSecret&redirect_uri=$redirectUrl"
         client.url(doc.tokenEndpoint).post(parameterString).map{
@@ -76,8 +76,8 @@ object GoogleAuthenticator {
   val DiscoveryDocumentUri = """https://accounts.google.com/.well-known/openid-configuration"""
 
 
-  def discoveryDocument(implicit client : WSClient) = (discoveryDocument, authorizationEndpointUpdateTime) match {
-    case (Some(_), updt) if System.currentTimeMillis > updt + (authorizationEndpointDurationInHours * 1000L) => {
+  def readDiscoveryDocument(implicit client : WSClient) = (discoveryDocument, authorizationEndpointUpdateTime) match {
+    case (Some(_), updt) if System.currentTimeMillis > updt + (authorizationEndpointDurationInHours.toLong * 1000L) => {
       refreshAuthorizationEndpoint
       discoveryDocument
     }
