@@ -19,15 +19,29 @@ class GoogleAuthenticator(client : WSClient) {
       case doc => {
         val scope = encodeUrlParameter("openid email")
         val responseType = "code"
-
         val url = s"""${doc.authorizationEndpoint}?response_type=$responseType&client_id=$clientId&scope=$scope&redirect_uri=$redirectUrl&state=$state&nonce=$nonce"""
         client.url(url).get().map {
           case res => {
+            logger.debug(s"On request to google, received headers: ${res.headers.toList.map(p => p._1 + ":" + p._2.mkString(",")).mkString("\r\n")}")
             AuthenticationReply(res.body, nonce, state)
           }
         }
       }
     }
+  }
+
+  def initializationURL(clientId : String, redirectUrl : String, nonce : String, state : String)(implicit executionContext: ExecutionContext) = {
+    GoogleAuthenticator.readDiscoveryDocument(client).map {
+      case doc => {
+        val scope = encodeUrlParameter("openid email")
+        val responseType = "code"
+        val stateParameter = URLEncoder.encode(state, "UTF-8")
+        val nonceParameter = URLEncoder.encode(state, "UTF-8")
+        val url = s"""${doc.authorizationEndpoint}?response_type=$responseType&client_id=$clientId&scope=$scope&redirect_uri=$redirectUrl&state=$stateParameter&nonce=$nonceParameter"""
+        url
+      }
+    }
+
   }
 
   def exchangeCode(code : String, clientId : String, clientSecret : String, redirectUrl : String)(implicit executionContext: ExecutionContext) = {
@@ -40,6 +54,16 @@ class GoogleAuthenticator(client : WSClient) {
       }
     }
   }
+
+  def exchangeCodeURL(code : String, clientId : String, clientSecret : String, redirectUrl : String)(implicit executionContext: ExecutionContext) = {
+    GoogleAuthenticator.readDiscoveryDocument(client).map {
+      case doc => {
+        val parameterString = s"code=$code&client_id=$clientId&client_secret=$clientSecret&redirect_uri=$redirectUrl"
+        parameterString
+      }
+    }
+  }
+
 
   private[GoogleAuthenticator] def loadAuthorizationEndpoint(implicit executionContext: ExecutionContext) = tried(
     client.url(DiscoveryDocumentUri).get().map {
