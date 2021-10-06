@@ -1,6 +1,6 @@
 package lokallykke.security
 
-import lokallykke.security.GoogleAuthenticator.{AuthenticationReply, DiscoveryDocumentUri}
+import lokallykke.security.GoogleAuthenticator.{AuthenticationReply, DiscoveryDocumentUri, ExchangeTokenBody, ExchangedToken}
 import lokallykke.security.model.replies.DiscoveryDocument
 import org.slf4j.LoggerFactory
 import play.api.libs.json.{JsError, JsSuccess, Json}
@@ -13,22 +13,6 @@ import scala.util.{Failure, Success, Try}
 
 class GoogleAuthenticator(client : WSClient) {
   private val logger = LoggerFactory.getLogger(this.getClass)
-
-  def initializeFlow(clientId : String, redirectUrl : String, nonce : String, state : String)(implicit executionContext: ExecutionContext) = {
-    GoogleAuthenticator.readDiscoveryDocument(client).map {
-      case doc => {
-        val scope = encodeUrlParameter("openid email")
-        val responseType = "code"
-        val url = s"""${doc.authorizationEndpoint}?response_type=$responseType&client_id=$clientId&scope=$scope&redirect_uri=$redirectUrl&state=$state&nonce=$nonce"""
-        client.url(url).get().map {
-          case res => {
-            logger.debug(s"On request to google, received headers: ${res.headers.toList.map(p => p._1 + ":" + p._2.mkString(",")).mkString("\r\n")}")
-            AuthenticationReply(res.body, nonce, state)
-          }
-        }
-      }
-    }
-  }
 
   def initializationURL(clientId : String, redirectUrl : String, nonce : String, state : String)(implicit executionContext: ExecutionContext) = {
     GoogleAuthenticator.readDiscoveryDocument(client).map {
@@ -47,19 +31,22 @@ class GoogleAuthenticator(client : WSClient) {
   def exchangeCode(code : String, clientId : String, clientSecret : String, redirectUrl : String)(implicit executionContext: ExecutionContext) = {
     GoogleAuthenticator.readDiscoveryDocument(client).map {
       case doc => {
-        val parameterString = s"code=$code&client_id=$clientId&client_secret=$clientSecret&redirect_uri=$redirectUrl"
-        client.url(doc.tokenEndpoint).post(parameterString).map{
-          case res => res.body
+        val enc = (str : String) =>  URLEncoder.encode(str, "UTF-8")
+        //val parameterString = s"code=${enc(code)}&client_id=${enc(clientId)}&client_secret=${enc(clientSecret)}&redirect_uri=$redirectUrl"
+        implicit val writes = GoogleAuthenticator.exchangeTokenBodyWrites
+        val body = Json.stringify(Json.toJson(ExchangeTokenBody(code, clientId, clientSecret, redirectUrl)))
+        client.url(doc.tokenEndpoint).post(body).map{
+          case res => {
+            logger.info(s"body result: ${res.body}")
+            val js = Json.parse(res.body)
+            val accessToken = (js \ "access_token").as[String]
+            val expiresIn = (js \ "expires_in").as[Long]
+            val idToken = (js\"id_token").as[String]
+            val scope = (js \ "scope").as[String]
+            logger.info(s"Got exchange code callback. accessToken: $accessToken, expiresIn: $expiresIn, idToken: $idToken, scope: $scope")
+            ExchangedToken(accessToken,expiresIn,idToken,scope)
+          }
         }
-      }
-    }
-  }
-
-  def exchangeCodeURL(code : String, clientId : String, clientSecret : String, redirectUrl : String)(implicit executionContext: ExecutionContext) = {
-    GoogleAuthenticator.readDiscoveryDocument(client).map {
-      case doc => {
-        val parameterString = s"code=$code&client_id=$clientId&client_secret=$clientSecret&redirect_uri=$redirectUrl"
-        parameterString
       }
     }
   }
@@ -96,6 +83,10 @@ object GoogleAuthenticator {
   private val logger = LoggerFactory.getLogger(this.getClass)
 
   case class AuthenticationReply(body : String, nonce : String, state : String)
+  case class ExchangedToken(accessToken : String, expiresInSeconds : Long, idToken : String, scope : String)
+  protected[GoogleAuthenticator] case class ExchangeTokenBody(code : String, client_id : String, client_secret : String, redirect_uri : String, grant_type : String = "authorization_code")
+  protected implicit val exchangeTokenBodyWrites = Json.writes[ExchangeTokenBody]
+
 
   val DiscoveryDocumentUri = """https://accounts.google.com/.well-known/openid-configuration"""
 
